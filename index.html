@@ -37,7 +37,7 @@ input[type=text]{-webkit-user-select:text;user-select:text}
 :focus-visible{outline:2px solid var(--focus);outline-offset:2px}
 
 /* La scène est toujours en 16:9, comme le projecteur : ce que tu règles ici est ce que la vidéo exportée montrera. */
-#stage{position:fixed;top:0;left:50%;transform:translateX(-50%);width:min(100vw,177.78vh);height:min(56.25vw,100vh);display:block;touch-action:none;background:#000;outline:1px solid #1b2130;transform-origin:0 0}
+#stage{position:fixed;top:var(--stage-top,0px);left:50%;transform:translateX(-50%);width:min(100vw,177.78vh);height:min(56.25vw,100vh);display:block;touch-action:none;background:#000;outline:1px solid #1b2130;transform-origin:0 0}
 body.proj #stage{outline:0}
 /* Zoom de l'écran de montage (pincer à deux doigts, molette, ou ces boutons). Jamais en projection. */
 .zoombar{position:fixed;z-index:6;top:calc(10px + env(safe-area-inset-top,0px));right:max(16px,env(safe-area-inset-right,0px));display:flex;gap:4px;padding:4px;background:var(--panel);border:1px solid var(--line);border-radius:8px}
@@ -142,7 +142,7 @@ body.proj .ui,body.proj .banner{display:none}
   <div class="sheet" id="sheet">
     <div class="pane cols" data-pane="shapes">
       <div class="pane">
-        <p class="hint">Glisse les ronds pour épouser la surface. Touche un carré pour ajouter un point, double-touche un rond pour le retirer. Menus repliés, le pavé de flèches ajuste au pixel près (le point choisi, sinon toute la forme) ; touche son centre pour le changer de côté.</p>
+        <p class="hint">Glisse les ronds pour épouser la surface. Carré : ajouter un point. Double-touche un rond : le retirer. Pince à deux doigts pour zoomer. Les flèches ajustent au pixel près le point choisi, sinon toute la forme.</p>
         <div class="chips wrap">
           <button class="chip" id="add-rect" type="button">+ Rectangle</button>
           <button class="chip" id="add-poly" type="button">+ Polygone libre</button>
@@ -568,6 +568,29 @@ let drag=null, drawing=null, ptrId=null, lastTap={t:0,x:0,y:0}, lastV={t:0,id:''
 const HIT=24, HIT_MID=18;
 function ptr(e){ const r=cv.getBoundingClientRect(); return {x:e.clientX-r.left,y:e.clientY-r.top,W:r.width,H:r.height}; }
 cv.addEventListener('contextmenu',e=>e.preventDefault());
+/* ---------- Disposition : en portrait, la scène est centrée dans la place libre au-dessus des outils, qui restent ouverts en bas. ---------- */
+const portrait=()=>window.innerHeight>window.innerWidth;
+function layoutStage(){
+  let top=0; const ui=$('#ui'), sh=$('#sheet'), H=window.innerHeight;
+  if(portrait()&&S.mode==='edit'){
+    /* le panneau prend la place qui reste sous la scène, et défile s'il est plus long */
+    const pad=$('#padrow'), dock=$('.dock');
+    const fixedH=(pad.hidden?0:pad.getBoundingClientRect().height)+dock.getBoundingClientRect().height;
+    sh.style.maxHeight=Math.max(120,Math.floor(H-cv.clientHeight-fixedH-12))+'px';
+    top=Math.max(0,Math.round((H-ui.getBoundingClientRect().height-cv.clientHeight)/2));
+  }else{
+    sh.style.maxHeight='';
+    if(portrait()) top=Math.max(0,Math.round((H-cv.clientHeight)/2));
+  }
+  /* en portrait, le zoom se range à gauche du pavé de flèches, sous la scène, pour ne rien cacher */
+  const zb=$('#zoombar'), pr=$('#padrow');
+  if(portrait()&&S.mode==='edit'&&!pr.hidden){ const r=pr.getBoundingClientRect(); zb.style.top=Math.round(r.top+8)+'px'; zb.style.right='auto'; zb.style.left='max(16px,env(safe-area-inset-left,0px))'; }
+  else{ zb.style.top=''; zb.style.right=''; zb.style.left=''; }
+  document.documentElement.style.setProperty('--stage-top',top+'px');
+}
+try{ new ResizeObserver(layoutStage).observe($('#ui')); }catch(_){}
+window.addEventListener('resize',()=>{ layoutStage(); refreshPad(); });
+
 /* ---------- Zoom de l'écran de montage ---------- */
 const VIEW={z:1,tx:0,ty:0};
 const touches=new Map(); let pinch=null;
@@ -627,7 +650,7 @@ cv.addEventListener('pointerdown',e=>{
     return;
   }
   if(drawing){ addDrawPoint(p); return; }
-  if(S.tab){ S.tab=null; refreshTabs(); }
+  if(S.tab&&!portrait()){ S.tab=null; refreshTabs(); }
   const L=cur();
   if(L&&!L.lock){
     const P=L.pts.map(q=>[q[0]*p.W,q[1]*p.H]);
@@ -694,7 +717,7 @@ cv.addEventListener('lostpointercapture',endDrag);
 /* ---------- Dessin d'un polygone libre ---------- */
 function startDraw(){
   drawing={pts:[]}; $('#ban').hidden=false; updBan();
-  if(S.tab){ S.tab=null; refreshTabs(); }
+  if(S.tab&&!portrait()){ S.tab=null; refreshTabs(); }
 }
 function updBan(){
   const n=drawing?drawing.pts.length:0;
@@ -853,7 +876,7 @@ $('#file').addEventListener('change',e=>{
 
 /* ---------- Calage précis : pavé de flèches, loupe, verrouillage ---------- */
 function refreshPad(){
-  const L=cur(), show=S.mode==='edit'&&!!L&&!L.lock&&!S.tab&&!drawing;
+  const L=cur(), show=S.mode==='edit'&&!!L&&!L.lock&&(!S.tab||portrait())&&!drawing;
   $('#padrow').hidden=!show;
   if(!show) return;
   if(S.vi>=L.pts.length) S.vi=-1;
@@ -984,7 +1007,7 @@ document.addEventListener('visibilitychange',()=>{ if(document.visibilityState==
 function setMode(m){
   S.mode=m; document.body.classList.toggle('proj',m==='proj');
   if(m==='proj'){ cancelDraw(); drag=null; ptrId=null; resetView(); say('Double-touche l’écran pour revenir aux réglages',3200); }
-  refreshPad();
+  refreshPad(); layoutStage();
   lock();
 }
 $('#go').addEventListener('click',()=>setMode('proj'));
