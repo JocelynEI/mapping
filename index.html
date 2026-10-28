@@ -37,8 +37,13 @@ input[type=text]{-webkit-user-select:text;user-select:text}
 :focus-visible{outline:2px solid var(--focus);outline-offset:2px}
 
 /* La scène est toujours en 16:9, comme le projecteur : ce que tu règles ici est ce que la vidéo exportée montrera. */
-#stage{position:fixed;top:0;left:50%;transform:translateX(-50%);width:min(100vw,177.78vh);height:min(56.25vw,100vh);display:block;touch-action:none;background:#000;outline:1px solid #1b2130}
+#stage{position:fixed;top:0;left:50%;transform:translateX(-50%);width:min(100vw,177.78vh);height:min(56.25vw,100vh);display:block;touch-action:none;background:#000;outline:1px solid #1b2130;transform-origin:0 0}
 body.proj #stage{outline:0}
+/* Zoom de l'écran de montage (pincer à deux doigts, molette, ou ces boutons). Jamais en projection. */
+.zoombar{position:fixed;z-index:6;top:calc(10px + env(safe-area-inset-top,0px));right:max(16px,env(safe-area-inset-right,0px));display:flex;gap:4px;padding:4px;background:var(--panel);border:1px solid var(--line);border-radius:8px}
+.zoombar button{min-width:40px;min-height:36px;padding:0 8px;border-radius:6px;border:1px solid var(--line);background:var(--raised);color:var(--fg);font-weight:600;cursor:pointer}
+.zoombar #z-lab{font:600 12px var(--mono);color:var(--lamp);background:transparent;border-color:transparent;font-variant-numeric:tabular-nums}
+body.proj .zoombar{display:none}
 .f.wide{grid-column:1/-1}
 .exp{width:100%;min-height:84px;border-radius:6px;border:1px solid var(--line);background:var(--ink);color:var(--muted);font:11px/1.3 var(--mono);padding:8px;-webkit-user-select:text;user-select:text;resize:vertical}
 
@@ -113,6 +118,12 @@ body.proj .ui,body.proj .banner{display:none}
 </style>
 
 <canvas id="stage" role="img" aria-label="Scène de projection avec les formes et leurs effets animés"></canvas>
+
+<div class="zoombar" id="zoombar" aria-label="Zoom de l’écran de montage">
+  <button type="button" id="z-out" aria-label="Dézoomer">−</button>
+  <button type="button" id="z-lab" aria-label="Revenir à l’écran entier">×1</button>
+  <button type="button" id="z-in" aria-label="Zoomer">+</button>
+</div>
 
 <div class="banner" id="ban" hidden>
   <span id="ban-txt">Touche pour poser les points</span>
@@ -500,9 +511,10 @@ function drawLayer(x,L,W,H,D,t){
   x.restore();
 }
 function overlay(x,W,H){
+  const u=1/VIEW.z;   /* garde poignées et traits à la même taille à l'écran, quel que soit le zoom */
   if(S.grid){
     const cell=Math.max(40,Math.round(Math.min(W,H)/8));
-    x.strokeStyle='rgba(255,255,255,.16)'; x.lineWidth=1; x.beginPath();
+    x.strokeStyle='rgba(255,255,255,.16)'; x.lineWidth=u; x.beginPath();
     for(let X=0;X<=W;X+=cell){x.moveTo(X+.5,0);x.lineTo(X+.5,H);}
     for(let Y=0;Y<=H;Y+=cell){x.moveTo(0,Y+.5);x.lineTo(W,Y+.5);}
     x.stroke();
@@ -513,31 +525,31 @@ function overlay(x,W,H){
     const P=L.pts.map(p=>[p[0]*W,p[1]*H]), on=L===cs;
     x.beginPath(); poly(x,P); x.closePath();
     if(on){ x.fillStyle='rgba(255,176,32,.07)'; x.fill(); }
-    x.lineWidth=on?2.5:1.5; x.strokeStyle=on?'#ffb020':'rgba(255,255,255,.55)';
-    if(L.lock) x.setLineDash([6,5]);
+    x.lineWidth=(on?2.5:1.5)*u; x.strokeStyle=on?'#ffb020':'rgba(255,255,255,.55)';
+    if(L.lock) x.setLineDash([6*u,5*u]);
     x.stroke(); x.setLineDash([]);
   }
   if(cs&&!cs.lock){
     const P=cs.pts.map(p=>[p[0]*W,p[1]*H]);
     P.forEach((p,i)=>{
       const q=P[(i+1)%P.length], m=[(p[0]+q[0])/2,(p[1]+q[1])/2];
-      x.fillStyle='#ffb020'; x.strokeStyle='#1a1204'; x.lineWidth=1.5; x.fillRect(m[0]-5,m[1]-5,10,10); x.strokeRect(m[0]-5,m[1]-5,10,10);
+      x.fillStyle='#ffb020'; x.strokeStyle='#1a1204'; x.lineWidth=1.5*u; x.fillRect(m[0]-5*u,m[1]-5*u,10*u,10*u); x.strokeRect(m[0]-5*u,m[1]-5*u,10*u,10*u);
     });
     P.forEach((p,i)=>{
       const on=i===S.vi;
-      x.beginPath(); x.arc(p[0],p[1],on?11:9,0,Math.PI*2); x.fillStyle=on?'#ffb020':'#fff'; x.fill();
-      x.lineWidth=3; x.strokeStyle=on?'#fff':'#ffb020'; x.stroke();
+      x.beginPath(); x.arc(p[0],p[1],(on?11:9)*u,0,Math.PI*2); x.fillStyle=on?'#ffb020':'#fff'; x.fill();
+      x.lineWidth=3*u; x.strokeStyle=on?'#fff':'#ffb020'; x.stroke();
     });
   }
   if(drawing){
     const P=drawing.pts.map(p=>[p[0]*W,p[1]*H]);
-    x.strokeStyle='#ffb020'; x.lineWidth=2.5; x.beginPath(); poly(x,P); x.stroke();
-    P.forEach((p,i)=>{ x.beginPath(); x.arc(p[0],p[1],i===0&&P.length>=3?13:7,0,Math.PI*2); x.fillStyle=i===0?'#ffb020':'#fff'; x.fill(); });
+    x.strokeStyle='#ffb020'; x.lineWidth=2.5*u; x.beginPath(); poly(x,P); x.stroke();
+    P.forEach((p,i)=>{ x.beginPath(); x.arc(p[0],p[1],(i===0&&P.length>=3?13:7)*u,0,Math.PI*2); x.fillStyle=i===0?'#ffb020':'#fff'; x.fill(); });
   }
 }
 let ctx2=null;
 function render(t){
-  const D=Math.min(window.devicePixelRatio||1,2), W=cv.clientWidth, H=cv.clientHeight;
+  const D=Math.min((window.devicePixelRatio||1)*VIEW.z,VIEW.z>1?4:2), W=cv.clientWidth, H=cv.clientHeight;
   const w=Math.round(W*D), h=Math.round(H*D);
   if(w<2||h<2) return;
   if(cv.width!==w||cv.height!==h){ cv.width=w; cv.height=h; }
@@ -556,8 +568,57 @@ let drag=null, drawing=null, ptrId=null, lastTap={t:0,x:0,y:0}, lastV={t:0,id:''
 const HIT=24, HIT_MID=18;
 function ptr(e){ const r=cv.getBoundingClientRect(); return {x:e.clientX-r.left,y:e.clientY-r.top,W:r.width,H:r.height}; }
 cv.addEventListener('contextmenu',e=>e.preventDefault());
+/* ---------- Zoom de l'écran de montage ---------- */
+const VIEW={z:1,tx:0,ty:0};
+const touches=new Map(); let pinch=null;
+function clampView(){
+  const w=cv.clientWidth, h=cv.clientHeight;
+  VIEW.z=cl(VIEW.z,1,5); VIEW.tx=cl(VIEW.tx,-(VIEW.z-1)*w,0); VIEW.ty=cl(VIEW.ty,-(VIEW.z-1)*h,0);
+}
+function applyView(){
+  clampView();
+  cv.style.transform=VIEW.z===1?'':`translateX(-50%) translate(${VIEW.tx}px,${VIEW.ty}px) scale(${VIEW.z})`;
+  $('#z-lab').textContent='×'+(Math.round(VIEW.z*10)/10).toString().replace('.',',');
+}
+function zoomAt(cx,cy,z){
+  const r=cv.getBoundingClientRect(), p=[(cx-r.left)/VIEW.z,(cy-r.top)/VIEW.z], bx=r.left-VIEW.tx, by=r.top-VIEW.ty;
+  VIEW.z=cl(z,1,5); VIEW.tx=cx-bx-VIEW.z*p[0]; VIEW.ty=cy-by-VIEW.z*p[1]; applyView();
+}
+function viewCenter(){
+  const r=cv.getBoundingClientRect(), bx=r.left-VIEW.tx, by=r.top-VIEW.ty;
+  return [bx+cv.clientWidth/2, by+Math.min(cv.clientHeight,window.innerHeight)/2];
+}
+function resetView(){ VIEW.z=1; VIEW.tx=0; VIEW.ty=0; applyView(); }
+function pinchInfo(){
+  const [a,b]=[...touches.values()];
+  return {d:Math.hypot(a[0]-b[0],a[1]-b[1])||1, m:[(a[0]+b[0])/2,(a[1]+b[1])/2]};
+}
+function startPinch(){
+  if(drag){
+    if(drag.snap0) drag.L.pts=drag.snap0;   /* le 1er doigt avait commencé à bouger un point : on annule */
+    const id=ptrId; drag=null; ptrId=null; try{ cv.releasePointerCapture(id); }catch(_){}
+  }
+  const r=cv.getBoundingClientRect(), i=pinchInfo();
+  pinch={d0:i.d,z0:VIEW.z,bx:r.left-VIEW.tx,by:r.top-VIEW.ty,p:[(i.m[0]-r.left)/VIEW.z,(i.m[1]-r.top)/VIEW.z]};
+}
+function movePinch(){
+  const i=pinchInfo(), z=cl(pinch.z0*i.d/pinch.d0,1,5);
+  VIEW.z=z; VIEW.tx=i.m[0]-pinch.bx-z*pinch.p[0]; VIEW.ty=i.m[1]-pinch.by-z*pinch.p[1]; applyView();
+}
+function dropTouch(e){ touches.delete(e.pointerId); if(pinch&&touches.size<2){ pinch=null; save(); } }
+window.addEventListener('pointerup',dropTouch);
+window.addEventListener('pointercancel',dropTouch);
+cv.addEventListener('wheel',e=>{ if(S.mode!=='edit') return; e.preventDefault(); zoomAt(e.clientX,e.clientY,VIEW.z*Math.exp(-e.deltaY*0.0025)); },{passive:false});
+$('#z-in').addEventListener('click',()=>{ const c=viewCenter(); zoomAt(c[0],c[1],VIEW.z*1.5); });
+$('#z-out').addEventListener('click',()=>{ const c=viewCenter(); zoomAt(c[0],c[1],VIEW.z/1.5); });
+$('#z-lab').addEventListener('click',resetView);
+window.addEventListener('resize',applyView);
+
 cv.addEventListener('pointerdown',e=>{
   e.preventDefault();
+  touches.set(e.pointerId,[e.clientX,e.clientY]);
+  if(S.mode==='edit'&&touches.size>=2){ if(!pinch) startPinch(); return; }
+  if(pinch) return;
   if(ptrId!==null) return;
   const p=ptr(e), now=performance.now();
   if(S.mode==='proj'){
@@ -597,8 +658,10 @@ cv.addEventListener('pointerdown',e=>{
   }
   select(null);
 });
-function start(e,d){ drag=d; ptrId=e.pointerId; try{ cv.setPointerCapture(e.pointerId); }catch(_){} }
+function start(e,d){ d.snap0=d.L.pts.map(q=>[q[0],q[1]]); drag=d; ptrId=e.pointerId; try{ cv.setPointerCapture(e.pointerId); }catch(_){} }
 cv.addEventListener('pointermove',e=>{
+  if(touches.has(e.pointerId)) touches.set(e.pointerId,[e.clientX,e.clientY]);
+  if(pinch){ e.preventDefault(); if(touches.size>=2) movePinch(); return; }
   if(!drag||e.pointerId!==ptrId) return;
   e.preventDefault();
   const p=ptr(e);
@@ -799,7 +862,7 @@ function refreshPad(){
 let loupeUntil=0;
 function nudge(dx,dy){
   const L=cur(); if(!L||L.lock) return;
-  const W=cv.clientWidth||1, H=cv.clientHeight||1, ux=dx/W, uy=dy/H;
+  const r=cv.getBoundingClientRect(), W=r.width||1, H=r.height||1, ux=dx/W, uy=dy/H;   /* 1 pixel à l'écran, donc plus fin quand on zoome */
   if(S.vi>=0&&S.vi<L.pts.length){
     const p=L.pts[S.vi]; L.pts[S.vi]=[cl(p[0]+ux),cl(p[1]+uy)];
     loupeUntil=performance.now()+900;
@@ -843,7 +906,7 @@ function loupePoint(){
 }
 function grabLoupe(W,H,D){
   const lp=loupePoint(); loupeOn=!!lp; if(!lp) return;
-  const q=lp.L.pts[lp.i], px=q[0]*W, py=q[1]*H, sz=Math.round(2*LR*D);
+  const q=lp.L.pts[lp.i], px=q[0]*W, py=q[1]*H, sz=Math.round(2*LR/VIEW.z*D);
   if(LP.width!==sz){ LP.width=sz; LP.height=sz; }
   LX.setTransform(1,0,0,1,0,0); LX.fillStyle='#000'; LX.fillRect(0,0,sz,sz);
   LX.imageSmoothingEnabled=false;
@@ -851,18 +914,18 @@ function grabLoupe(W,H,D){
 }
 function drawLoupe(x,W,H){
   if(!loupeOn) return; const lp=loupePoint(); if(!lp) return;
-  const q=lp.L.pts[lp.i], px=q[0]*W, py=q[1]*H, gap=LR+56;
-  let cx=cl(px,LR+6,W-LR-6), cy=py-gap;
-  if(cy<LR+6){ cy=cl(py,LR+6,H-LR-6); cx=px>W/2?px-gap:px+gap; }
-  x.save(); x.beginPath(); x.arc(cx,cy,LR,0,Math.PI*2); x.clip();
-  x.drawImage(LP,cx-LR,cy-LR,2*LR,2*LR);
+  const u=1/VIEW.z, R=LR*u, q=lp.L.pts[lp.i], px=q[0]*W, py=q[1]*H, gap=R+56*u, m=6*u;
+  let cx=cl(px,R+m,W-R-m), cy=py-gap;
+  if(cy<R+m){ cy=cl(py,R+m,H-R-m); cx=px>W/2?px-gap:px+gap; }
+  x.save(); x.beginPath(); x.arc(cx,cy,R,0,Math.PI*2); x.clip();
+  x.drawImage(LP,cx-R,cy-R,2*R,2*R);
   const P=lp.L.pts.map(p=>[cx+(p[0]*W-px)*LZ,cy+(p[1]*H-py)*LZ]);
-  x.beginPath(); poly(x,P); x.closePath(); x.lineWidth=1.5; x.strokeStyle='rgba(255,176,32,.9)'; x.stroke();
-  x.strokeStyle='#fff'; x.lineWidth=1; x.beginPath();
-  x.moveTo(cx-12,cy); x.lineTo(cx-3,cy); x.moveTo(cx+3,cy); x.lineTo(cx+12,cy);
-  x.moveTo(cx,cy-12); x.lineTo(cx,cy-3); x.moveTo(cx,cy+3); x.lineTo(cx,cy+12); x.stroke();
+  x.beginPath(); poly(x,P); x.closePath(); x.lineWidth=1.5*u; x.strokeStyle='rgba(255,176,32,.9)'; x.stroke();
+  x.strokeStyle='#fff'; x.lineWidth=u; x.beginPath();
+  x.moveTo(cx-12*u,cy); x.lineTo(cx-3*u,cy); x.moveTo(cx+3*u,cy); x.lineTo(cx+12*u,cy);
+  x.moveTo(cx,cy-12*u); x.lineTo(cx,cy-3*u); x.moveTo(cx,cy+3*u); x.lineTo(cx,cy+12*u); x.stroke();
   x.restore();
-  x.beginPath(); x.arc(cx,cy,LR,0,Math.PI*2); x.lineWidth=3; x.strokeStyle=(drag&&drag.snap)?'#7aa2ff':'#ffb020'; x.stroke();
+  x.beginPath(); x.arc(cx,cy,R,0,Math.PI*2); x.lineWidth=3*u; x.strokeStyle=(drag&&drag.snap)?'#7aa2ff':'#ffb020'; x.stroke();
 }
 
 /* Fond caméra ou photo du mur : aide au calage. Visible seulement en édition : jamais projeté, jamais exporté. */
@@ -920,7 +983,7 @@ async function lock(){
 document.addEventListener('visibilitychange',()=>{ if(document.visibilityState==='visible') lock(); });
 function setMode(m){
   S.mode=m; document.body.classList.toggle('proj',m==='proj');
-  if(m==='proj'){ cancelDraw(); drag=null; ptrId=null; say('Double-touche l’écran pour revenir aux réglages',3200); }
+  if(m==='proj'){ cancelDraw(); drag=null; ptrId=null; resetView(); say('Double-touche l’écran pour revenir aux réglages',3200); }
   refreshPad();
   lock();
 }
