@@ -44,6 +44,9 @@ body.proj #stage{outline:0}
 .zoombar button{min-width:40px;min-height:36px;padding:0 8px;border-radius:6px;border:1px solid var(--line);background:var(--raised);color:var(--fg);font-weight:600;cursor:pointer}
 .zoombar #z-lab{font:600 12px var(--mono);color:var(--lamp);background:transparent;border-color:transparent;font-variant-numeric:tabular-nums}
 body.proj .zoombar{display:none}
+.recbar{height:8px;border-radius:4px;background:var(--raised);overflow:hidden}
+#rec-fill{height:100%;width:0;background:var(--lamp);transition:width .3s}
+a.chip{display:inline-flex;align-items:center;text-decoration:none}
 .f.wide{grid-column:1/-1}
 .exp{width:100%;min-height:84px;border-radius:6px;border:1px solid var(--line);background:var(--ink);color:var(--muted);font:11px/1.3 var(--mono);padding:8px;-webkit-user-select:text;user-select:text;resize:vertical}
 
@@ -190,9 +193,24 @@ body.proj .ui,body.proj .banner{display:none}
         <div class="f"><div class="top"><label for="master">Luminosité générale</label><output id="o-master"></output></div><input type="range" id="master" min="0.2" max="1" step="0.05" value="1"></div>
         <div class="f"><button class="chip danger" id="reset" type="button">Tout effacer</button></div>
       </div>
+      <div class="f wide" id="rec-box">
+        <span class="lab">Vidéo pour la clé USB</span>
+        <p class="hint">Fabrique ici le MP4 que lit le projecteur (640x360, H.264 Baseline, 25 images/s), avec tous les effets. L’enregistrement se fait en temps réel : garde l’écran allumé et la page ouverte. Commence par le test de 10 s.</p>
+        <div class="chips wrap" id="rec-durs"></div>
+        <div class="chips wrap">
+          <button class="chip" id="rec-go" type="button" aria-pressed="true">Fabriquer la vidéo</button>
+          <button class="chip danger" id="rec-stop" type="button" hidden>Arrêter et garder ce qui est fait</button>
+        </div>
+        <div class="recbar" id="rec-bar" hidden><div id="rec-fill"></div></div>
+        <p class="hint" id="rec-msg" role="status"></p>
+        <div class="chips wrap" id="rec-out" hidden>
+          <button class="chip" id="rec-save" type="button" aria-pressed="true">Enregistrer la vidéo</button>
+          <a class="chip" id="rec-link" href="#" download="mapping_usb.mp4">Télécharger directement</a>
+        </div>
+      </div>
       <div class="f wide">
-        <span class="lab">Fabriquer la vidéo finale</span>
-        <p class="hint">Une fois tes formes calées sur le mur, touche « Copier la scène » puis colle le texte dans une conversation avec Claude. Il te rend une vidéo prête pour la clé USB, sans aucune interface à l’écran.</p>
+        <span class="lab">Autre solution : passer par Claude</span>
+        <p class="hint">Touche « Copier la scène » puis colle le texte dans une conversation avec Claude, avec tes vidéos. Il te rend la vidéo prête pour la clé USB.</p>
         <div class="chips wrap"><button class="chip" id="exp-copy" type="button">Copier la scène</button></div>
         <textarea class="exp" id="exp" readonly rows="4" aria-label="Scène à coller dans la conversation" hidden></textarea>
       </div>
@@ -561,7 +579,7 @@ function render(t){
   x.setTransform(D,0,0,D,0,0); x.globalAlpha=1; x.globalCompositeOperation='source-over';
   if(S.mode==='edit'){ grabLoupe(W,H,D); overlay(x,W,H); drawLoupe(x,W,H); }
 }
-function frame(now){ try{ render(now/1000); }catch(e){ console.error(e); } requestAnimationFrame(frame); }
+function frame(now){ try{ if(REC.busy) previewExport(); else render(now/1000); }catch(e){ console.error(e); } requestAnimationFrame(frame); }
 
 /* ---------- Gestes sur la scène ---------- */
 let drag=null, drawing=null, ptrId=null, lastTap={t:0,x:0,y:0}, lastV={t:0,id:'',i:-1};
@@ -808,6 +826,7 @@ function refreshTabs(){
 }
 function refreshSet(){
   $('#grid').checked=S.grid; $('#snap').checked=S.snap; $('#master').value=S.master; $('#o-master').textContent=Math.round(S.master*100)+' %';
+  refreshRec();
 }
 function refreshAll(){ refreshLayers(); refreshFx(); refreshTabs(); refreshSet(); refreshBG(); }
 
@@ -856,6 +875,190 @@ twoStep($('#reset'),'Confirmer l’effacement',()=>{
 });
 
 
+/* ---------- Vidéo pour la clé USB : fabriquée sur place (WebCodecs), au format lu par le projecteur ---------- */
+const OUT={W:640,H:360,FPS:25,BR:1500000};
+const REC={dur:'test',busy:false,stop:false,blob:null,url:'',name:''};
+const EX_CV=document.createElement('canvas'); EX_CV.width=OUT.W; EX_CV.height=OUT.H;
+const EX_X=EX_CV.getContext('2d');
+const fmtDur=s=>{ s=Math.round(s); return Math.floor(s/60)+':'+String(s%60).padStart(2,'0'); };
+function mediaLayers(){ return S.layers.filter(L=>L.fx==='media'&&L.src&&SRC[L.src]); }
+function fullDur(){
+  let d=0;
+  for(const L of mediaLayers()){ const m=SRC[L.src]; if(m.kind==='video'&&isFinite(m.el.duration)) d=Math.max(d,m.el.duration); }
+  return d;
+}
+function durSec(){ return REC.dur==='test'?10:REC.dur==='30'?30:REC.dur==='60'?60:(fullDur()||30); }
+function recMsg(t){ $('#rec-msg').textContent=t||''; }
+function setBar(p){ $('#rec-bar').hidden=p<0; $('#rec-fill').style.width=Math.round(cl(p,0,1)*100)+'%'; }
+function refreshRec(){
+  const fd=fullDur(), opts=[['test','Test 10 s'],['30','30 s'],['60','1 min']];
+  if(fd>0) opts.push(['full','Vidéo entière ('+fmtDur(fd)+')']);
+  if(REC.dur==='full'&&!(fd>0)) REC.dur='test';
+  $('#rec-durs').replaceChildren(...opts.map(([k,n])=>{ const b=chip(n,REC.dur===k,()=>{ REC.dur=k; refreshRec(); }); b.disabled=REC.busy; return b; }));
+  $('#rec-go').hidden=REC.busy; $('#rec-stop').hidden=!REC.busy; $('#go').disabled=REC.busy;
+}
+function clearOut(){
+  if(REC.url){ try{ URL.revokeObjectURL(REC.url); }catch(_){} }
+  REC.blob=null; REC.url=''; $('#rec-out').hidden=true;
+}
+function drawExport(t){
+  const x=EX_X; x.setTransform(1,0,0,1,0,0); x.globalAlpha=1; x.globalCompositeOperation='source-over';
+  x.fillStyle='#000'; x.fillRect(0,0,OUT.W,OUT.H);
+  for(const L of S.layers){ try{ drawLayer(x,L,OUT.W,OUT.H,1,t); }catch(e){ console.error(e); } }
+}
+function previewExport(){
+  const D=Math.min(window.devicePixelRatio||1,2), w=Math.round(cv.clientWidth*D), h=Math.round(cv.clientHeight*D);
+  if(w<2||h<2) return;
+  if(cv.width!==w||cv.height!==h){ cv.width=w; cv.height=h; }
+  const x=ctx2||(ctx2=cv.getContext('2d'));
+  x.setTransform(1,0,0,1,0,0); x.globalAlpha=1; x.globalCompositeOperation='source-over'; x.drawImage(EX_CV,0,0,w,h);
+}
+let muxLib=null;
+function loadMuxer(){
+  if(window.Mp4Muxer) return Promise.resolve(window.Mp4Muxer);
+  if(muxLib) return muxLib;
+  muxLib=new Promise((res,rej)=>{
+    const s=document.createElement('script');
+    s.src='https://cdn.jsdelivr.net/npm/mp4-muxer@5.2.2/build/mp4-muxer.js';
+    s.onload=()=>window.Mp4Muxer?res(window.Mp4Muxer):rej(new Error('muxer'));
+    s.onerror=()=>{ muxLib=null; rej(new Error('muxer')); };
+    document.head.appendChild(s);
+  });
+  return muxLib;
+}
+async function pickCodec(){
+  /* H.264 profil Baseline, niveau 3.0 puis 3.1 : le seul que le projecteur accepte */
+  for(const codec of ['avc1.42E01E','avc1.42001E','avc1.42E01F','avc1.42001F']){
+    try{
+      const r=await VideoEncoder.isConfigSupported({codec,width:OUT.W,height:OUT.H,bitrate:OUT.BR,framerate:OUT.FPS,avc:{format:'avc'}});
+      if(r&&r.supported) return codec;
+    }catch(_){}
+  }
+  return '';
+}
+/* Son : celui de la première vidéo utilisée, encodé en AAC si le téléphone le sait. Sinon la vidéo est muette. */
+async function prepAudio(file,dur){
+  if(!window.AudioEncoder||!window.AudioData||!file) return null;
+  const tries=[{codec:'mp4a.40.2',mux:'aac',sampleRate:44100}];
+  if(window.__recTestOpus) tries.push({codec:'opus',mux:'opus',sampleRate:48000});
+  let c=null;
+  for(const t of tries){
+    try{ const r=await AudioEncoder.isConfigSupported({codec:t.codec,sampleRate:t.sampleRate,numberOfChannels:2,bitrate:96000}); if(r&&r.supported){ c=t; break; } }catch(_){}
+  }
+  if(!c) return null;
+  const AC=window.AudioContext||window.webkitAudioContext; if(!AC) return null;
+  const ac=new AC({sampleRate:c.sampleRate});
+  let buf;
+  try{ buf=await ac.decodeAudioData(await file.arrayBuffer()); }finally{ try{ ac.close(); }catch(_){} }
+  const chunks=[]; let err=null;
+  const enc=new AudioEncoder({output:(ch,meta)=>chunks.push([ch,meta]),error:e=>{ err=e; }});
+  enc.configure({codec:c.codec,sampleRate:c.sampleRate,numberOfChannels:2,bitrate:96000});
+  const sr=buf.sampleRate, n=Math.min(buf.length,Math.round(dur*sr)), L0=buf.getChannelData(0), R0=buf.numberOfChannels>1?buf.getChannelData(1):L0;
+  for(let o=0;o<n&&!err;o+=1024){
+    const k=Math.min(1024,n-o), d=new Float32Array(k*2);
+    d.set(L0.subarray(o,o+k),0); d.set(R0.subarray(o,o+k),k);
+    const ad=new AudioData({format:'f32-planar',sampleRate:sr,numberOfFrames:k,numberOfChannels:2,timestamp:Math.round(o/sr*1e6),data:d});
+    enc.encode(ad); ad.close();
+    if(enc.encodeQueueSize>40) await new Promise(r=>setTimeout(r,0));
+  }
+  await enc.flush(); enc.close();
+  if(err||!chunks.length) return null;
+  return {mux:c.mux,sampleRate:sr,chunks};
+}
+async function recordVideo(muxer,codec,dur){
+  let vErr=null;
+  const enc=new VideoEncoder({output:(c,m)=>muxer.addVideoChunk(c,m),error:e=>{ vErr=e; }});
+  enc.configure({codec,width:OUT.W,height:OUT.H,bitrate:OUT.BR,framerate:OUT.FPS,avc:{format:'avc'}});
+  /* toutes les vidéos repartent du début, ensemble */
+  const vids=[...new Set(mediaLayers().map(L=>SRC[L.src]))].filter(m=>m.kind==='video').map(m=>m.el);
+  for(const v of vids){ v.pause(); try{ v.currentTime=0; }catch(_){} }
+  await Promise.all(vids.map(v=>new Promise(r=>{
+    if(!v.seeking&&v.readyState>=2) return r();
+    const f=()=>{ v.removeEventListener('seeked',f); r(); }; v.addEventListener('seeked',f); setTimeout(r,2000);
+  })));
+  await Promise.all(vids.map(v=>v.play().catch(()=>{})));
+  const total=Math.max(1,Math.round(dur*OUT.FPS)); let i=0; const t0=performance.now();
+  await new Promise(resolve=>{
+    function tick(){
+      if(REC.stop||vErr){ resolve(); return; }
+      const due=Math.min(total,Math.floor((performance.now()-t0)/1000*OUT.FPS)+1);
+      while(i<due&&enc.encodeQueueSize<30){
+        drawExport(i/OUT.FPS);
+        const vf=new VideoFrame(EX_CV,{timestamp:Math.round(i*1e6/OUT.FPS),duration:Math.round(1e6/OUT.FPS)});
+        enc.encode(vf,{keyFrame:i%(OUT.FPS*2)===0}); vf.close(); i++;
+      }
+      setBar(i/total);
+      const left=Math.max(0,(total-i)/OUT.FPS);
+      recMsg('Enregistrement… '+fmtDur(i/OUT.FPS)+' / '+fmtDur(total/OUT.FPS)+' (encore '+fmtDur(left)+'). Garde l’écran allumé.');
+      if(i>=total){ resolve(); return; }
+      requestAnimationFrame(tick);
+    }
+    requestAnimationFrame(tick);
+  });
+  await enc.flush(); enc.close();
+  if(vErr) throw vErr;
+  return i;
+}
+async function makeVideo(){
+  if(REC.busy) return;
+  if(!window.VideoEncoder||!window.VideoFrame){ recMsg('Ce navigateur ne sait pas fabriquer la vidéo. Sur iPhone, utilise Safari à jour (iOS 16.4 ou plus).'); return; }
+  const missing=[...new Set(S.layers.filter(L=>L.fx==='media'&&L.src&&!SRC[L.src]).map(L=>L.src))];
+  if(missing.length){ recMsg('Recharge d’abord '+missing.join(', ')+' (onglet Effet > Choisir un fichier).'); return; }
+  const dur=durSec();
+  REC.busy=true; REC.stop=false; clearOut(); refreshRec(); resetView(); lock(); setBar(0);
+  try{
+    recMsg('Préparation…');
+    const codec=await pickCodec(); if(!codec) throw new Error('nocodec');
+    const M=await loadMuxer();
+    const first=mediaLayers().map(L=>SRC[L.src]).find(m=>m.kind==='video'&&m.file);
+    let audio=null;
+    if(first){ recMsg('Préparation du son…'); try{ audio=await prepAudio(first.file,dur); }catch(e){ console.error(e); audio=null; } }
+    const target=new M.ArrayBufferTarget();
+    const muxer=new M.Muxer({target,fastStart:'in-memory',firstTimestampBehavior:'offset',
+      video:{codec:'avc',width:OUT.W,height:OUT.H,frameRate:OUT.FPS},
+      audio:audio?{codec:audio.mux,numberOfChannels:2,sampleRate:audio.sampleRate}:undefined});
+    if(audio) for(const [ch,meta] of audio.chunks) muxer.addAudioChunk(ch,meta);
+    const n=await recordVideo(muxer,codec,dur);
+    if(n<OUT.FPS) throw new Error('stopped');
+    muxer.finalize();
+    REC.blob=new Blob([target.buffer],{type:'video/mp4'});
+    REC.url=URL.createObjectURL(REC.blob);
+    const d=new Date(), p2=v=>String(v).padStart(2,'0');
+    REC.name='mapping_'+p2(d.getDate())+p2(d.getMonth()+1)+'_'+p2(d.getHours())+p2(d.getMinutes())+'.mp4';
+    $('#rec-link').href=REC.url; $('#rec-link').setAttribute('download',REC.name);
+    $('#rec-out').hidden=false;
+    recMsg('Vidéo prête : '+fmtDur(n/OUT.FPS)+', 640x360, '+(audio?'avec le son':'sans le son (ton téléphone ne sait pas l’encoder ici)')+', '+(REC.blob.size/1048576).toFixed(1).replace('.',',')+' Mo. Enregistre-la, puis copie-la à la racine de la clé USB.');
+  }catch(e){
+    console.error(e);
+    const m=e&&e.message;
+    recMsg(m==='nocodec'?'Ce téléphone ne sait pas encoder en H.264 Baseline ici. Passe par Claude (Copier la scène).':
+      m==='muxer'?'Impossible de charger l’outil de fabrication. Vérifie la connexion internet et réessaie.':
+      m==='stopped'?'Fabrication arrêtée trop tôt : rien à garder.':'La fabrication a échoué ('+(m||e)+'). Passe par Claude en attendant.');
+  }finally{
+    REC.busy=false; refreshRec(); setBar(-1);
+    const vids=[...new Set(mediaLayers().map(L=>SRC[L.src]))].filter(m=>m.kind==='video').map(m=>m.el);
+    vids.forEach(v=>v.play().catch(()=>{}));
+  }
+}
+async function saveVideo(){
+  if(!REC.blob) return;
+  /* 1. dans Claude : la fenêtre d'enregistrement de l'appli ; 2. Safari : le menu Partager (Enregistrer dans Fichiers) ; 3. lien direct */
+  try{
+    if(window.claude&&typeof claude.use==='function'){
+      const dl=await claude.use('downloads');
+      if(dl){ try{ await dl.save({filename:REC.name,data:REC.blob}); return; }catch(e){ if(e&&e.code==='declined') return; } }
+    }
+  }catch(_){}
+  try{
+    const f=new File([REC.blob],REC.name,{type:'video/mp4'});
+    if(navigator.canShare&&navigator.canShare({files:[f]})){ await navigator.share({files:[f]}); return; }
+  }catch(e){ if(e&&e.name==='AbortError') return; }
+  $('#rec-link').click();
+}
+$('#rec-go').addEventListener('click',makeVideo);
+$('#rec-stop').addEventListener('click',()=>{ REC.stop=true; recMsg('Arrêt… je garde ce qui est déjà enregistré.'); });
+$('#rec-save').addEventListener('click',saveVideo);
+
 /* Image ou vidéo */
 $('#pick').addEventListener('click',()=>$('#file').click());
 $('#file').addEventListener('change',e=>{
@@ -866,10 +1069,11 @@ $('#file').addEventListener('change',e=>{
     const v=document.createElement('video');
     v.muted=true; v.loop=true; v.playsInline=true; v.setAttribute('playsinline',''); v.setAttribute('muted','');
     v.onerror=()=>say('Cette vidéo ne se lit pas ici. Essaie une image.',3600);
+    v.addEventListener('loadedmetadata',()=>refreshRec());
     v.src=url; v.play().catch(()=>{});
-    SRC[f.name]={kind:'video',el:v};
+    SRC[f.name]={kind:'video',el:v,file:f};
   }else{
-    const im=new Image(); im.onerror=()=>say('Image illisible.',3000); im.src=url; SRC[f.name]={kind:'img',el:im};
+    const im=new Image(); im.onerror=()=>say('Image illisible.',3000); im.src=url; SRC[f.name]={kind:'img',el:im,file:f};
   }
   L.fx='media'; L.col=6; L.src=f.name; L.crop=L.crop||{...FULL}; save(); refreshAll();
 });
