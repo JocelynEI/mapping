@@ -176,10 +176,11 @@ body.proj .ui,body.proj .banner{display:none}
             <span class="lab">Image ou vidéo</span>
             <div class="chips wrap"><button class="chip" id="pick" type="button">Choisir un fichier</button></div>
             <div class="chips wrap" id="srcs"></div>
+            <span class="lab">Adapter la vidéo à la forme</span>
+            <div class="chips wrap" id="fits"></div>
             <span class="lab">Zone de la vidéo à montrer</span>
             <div class="chips wrap" id="crops"></div>
             <div class="ctl" id="crop-sl"></div>
-            <div class="chips wrap" id="fits"></div>
           </div>
         </div>
       </div>
@@ -403,6 +404,7 @@ const FX={
     const m=SRC[L.src], info=mediaInfo(m);
     if(info){
       const c=L.crop||FULL, sx=c.x*info.w, sy=c.y*info.h, sw=Math.max(1,c.w*info.w), sh=Math.max(1,c.h*info.h);
+      if(L.fit==='stretch'){ x.drawImage(m.el,sx,sy,sw,sh,0,0,w,h); return; }   /* toute la vidéo, déformée pour remplir la forme */
       const k=(L.fit==='contain')?Math.min(w/sw,h/sh):Math.max(w/sw,h/sh);
       x.drawImage(m.el,sx,sy,sw,sh,(w-sw*k)/2,(h-sh*k)/2,sw*k,sh*k);
       return;
@@ -487,7 +489,7 @@ function load(){
     if(!ok.length) return false;
     S.layers=ok.map(L=>({id:L.id,name:String(L.name||'Forme'),pts:L.pts.map(p=>[cl(+p[0]),cl(+p[1])]),
       fx:FXN[L.fx]?L.fx:'calage',col:cl(+L.col||0,0,COL.length-1)|0,speed:cl(+L.speed||1,0.2,3),int:cl(+L.int||1,0.1,1),text:String(L.text||'BOO !').slice(0,24),
-      src:String(L.src||'').slice(0,120),crop:cleanCrop(L.crop),fit:L.fit==='contain'?'contain':'cover',lock:!!L.lock}));
+      src:String(L.src||'').slice(0,120),crop:cleanCrop(L.crop),fit:['contain','stretch'].includes(L.fit)?L.fit:'cover',lock:!!L.lock}));
     S.sel=S.layers.some(l=>l.id===j.sel)?j.sel:S.layers[0].id;
     S.n=Math.max(+j.n||0,S.layers.length); S.grid=j.grid!==false; S.snap=j.snap!==false; S.master=cl(+j.master||1,0.2,1);
     return true;
@@ -798,7 +800,11 @@ function refreshMedia(L){
   const c=L.crop||FULL;
   $('#crops').replaceChildren(...CROPS.map(([n,r])=>chip(n,['x','y','w','h'].every(k=>Math.abs(c[k]-r[k])<0.005),()=>{ L.crop={...r}; save(); refreshAll(); })));
   SLD.forEach(([id,,k])=>{ if(document.activeElement!==$('#'+id)) $('#'+id).value=Math.round(c[k]*100); $('#o-'+id).textContent=Math.round(c[k]*100)+' %'; });
-  $('#fits').replaceChildren(chip('Remplir la forme',(L.fit||'cover')==='cover',()=>{ L.fit='cover'; save(); refreshAll(); }),chip('Image entière (bords noirs)',L.fit==='contain',()=>{ L.fit='contain'; save(); refreshAll(); }));
+  const fit=L.fit||'cover', setFit=v=>()=>{ L.fit=v; save(); refreshAll(); };
+  $('#fits').replaceChildren(
+    chip('Étirer : toute la vidéo, à la forme',fit==='stretch',setFit('stretch')),
+    chip('Entière avec bandes noires',fit==='contain',setFit('contain')),
+    chip('Remplir en coupant les bords',fit==='cover',setFit('cover')));
 }
 SLD.forEach(([id,,k])=>$('#'+id).addEventListener('input',e=>{
   const L=cur(); if(!L) return; const c={...(L.crop||FULL)}; c[k]=(+e.target.value)/100;
