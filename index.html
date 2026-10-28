@@ -102,6 +102,14 @@ body.proj .ui,body.proj .banner{display:none}
 }
 .toast.on{opacity:1}
 @media (prefers-reduced-motion:reduce){.toast{transition:none}}
+
+/* Pavé de flèches : flotte au-dessus du dock quand une forme est choisie et les menus repliés. */
+.padrow{display:flex;justify-content:flex-end;padding:0 max(16px,env(safe-area-inset-right,0px)) 8px max(16px,env(safe-area-inset-left,0px));pointer-events:none}
+.padrow.left{justify-content:flex-start}
+.pad{pointer-events:auto;display:grid;grid-template-columns:repeat(3,44px);grid-template-rows:repeat(3,40px);gap:4px;padding:6px;background:var(--panel);border:1px solid var(--line);border-radius:10px}
+.pk{border:1px solid var(--line);background:var(--raised);color:var(--fg);border-radius:6px;font-size:14px;cursor:pointer;touch-action:none;padding:0}
+.pk:active{background:var(--lamp);color:var(--on-lamp)}
+.pk.lab2{font:600 10.5px/1.1 var(--mono);color:var(--lamp);background:transparent;border-color:transparent}
 </style>
 
 <canvas id="stage" role="img" aria-label="Scène de projection avec les formes et leurs effets animés"></canvas>
@@ -113,15 +121,23 @@ body.proj .ui,body.proj .banner{display:none}
 </div>
 
 <div class="ui" id="ui">
+  <div class="padrow" id="padrow" hidden>
+    <div class="pad" id="pad" aria-label="Ajuster au pixel près">
+      <span></span><button type="button" class="pk" data-d="0,-1" aria-label="Monter">▲</button><span></span>
+      <button type="button" class="pk" data-d="-1,0" aria-label="Gauche">◀</button><button type="button" class="pk lab2" id="pad-lab" aria-label="Changer le pavé de côté">Forme</button><button type="button" class="pk" data-d="1,0" aria-label="Droite">▶</button>
+      <span></span><button type="button" class="pk" data-d="0,1" aria-label="Descendre">▼</button><span></span>
+    </div>
+  </div>
   <div class="sheet" id="sheet">
     <div class="pane cols" data-pane="shapes">
       <div class="pane">
-        <p class="hint">Glisse les ronds pour épouser la surface. Touche un carré pour ajouter un point, double-touche un rond pour le retirer.</p>
+        <p class="hint">Glisse les ronds pour épouser la surface. Touche un carré pour ajouter un point, double-touche un rond pour le retirer. Menus repliés, le pavé de flèches ajuste au pixel près (le point choisi, sinon toute la forme) ; touche son centre pour le changer de côté.</p>
         <div class="chips wrap">
           <button class="chip" id="add-rect" type="button">+ Rectangle</button>
           <button class="chip" id="add-poly" type="button">+ Polygone libre</button>
           <button class="chip" id="dup" type="button">Dupliquer</button>
           <button class="chip danger" id="del" type="button">Supprimer</button>
+          <button class="chip" id="lock" type="button" aria-pressed="false">Verrouiller</button>
           
           <button class="chip" id="cam" type="button" aria-pressed="false">Caméra en fond</button>
           <button class="chip" id="photo" type="button" aria-pressed="false">Photo du mur</button>
@@ -158,13 +174,14 @@ body.proj .ui,body.proj .banner{display:none}
     <div class="pane" data-pane="set" hidden>
       <div class="ctl">
         <label class="chk"><input type="checkbox" id="grid" checked> Quadrillage d’aide (édition seulement)</label>
+        <label class="chk"><input type="checkbox" id="snap" checked> Aimanter les coins (formes voisines et bords)</label>
         <div class="f" id="row-bg" hidden><div class="top"><label for="bgdim">Luminosité du fond caméra</label><output id="o-bgdim"></output></div><input type="range" id="bgdim" min="0.1" max="1" step="0.05" value="0.8"><div class="chips wrap"><button class="chip danger" id="bg-off" type="button">Retirer le fond</button></div></div>
         <div class="f"><div class="top"><label for="master">Luminosité générale</label><output id="o-master"></output></div><input type="range" id="master" min="0.2" max="1" step="0.05" value="1"></div>
         <div class="f"><button class="chip danger" id="reset" type="button">Tout effacer</button></div>
       </div>
       <div class="f wide">
         <span class="lab">Fabriquer la vidéo finale</span>
-        <p class="hint">Une fois tes formes calées sur le mur, touche « Copier la scène » puis colle le texte dans la conversation avec Claude. Il te rend une vidéo prête pour la clé USB, sans aucune interface à l’écran.</p>
+        <p class="hint">Une fois tes formes calées sur le mur, touche « Copier la scène » puis colle le texte dans une conversation avec Claude. Il te rend une vidéo prête pour la clé USB, sans aucune interface à l’écran.</p>
         <div class="chips wrap"><button class="chip" id="exp-copy" type="button">Copier la scène</button></div>
         <textarea class="exp" id="exp" readonly rows="4" aria-label="Scène à coller dans la conversation" hidden></textarea>
       </div>
@@ -396,12 +413,12 @@ function warp(x,img,iw,ih,Q){
 }
 
 /* ---------- État ---------- */
-const S={layers:[],sel:null,n:0,grid:true,master:1,mode:'edit',tab:'shapes'};
+const S={layers:[],sel:null,n:0,grid:true,snap:true,vi:-1,master:1,mode:'edit',tab:'shapes'};
 const KEY='atelier-mapping-v1';
 let uc=0;
 const uid=()=>'L'+Date.now().toString(36)+(uc++).toString(36)+Math.floor(Math.random()*1296).toString(36);
 const cur=()=>S.layers.find(l=>l.id===S.sel)||null;
-function mkLayer(pts){ S.n++; return {id:uid(),name:'Forme '+S.n,pts,fx:'calage',col:2,speed:1,int:1,text:'BOO !',src:'',crop:{...FULL},fit:'cover'}; }
+function mkLayer(pts){ S.n++; return {id:uid(),name:'Forme '+S.n,pts,fx:'calage',col:2,speed:1,int:1,text:'BOO !',src:'',crop:{...FULL},fit:'cover',lock:false}; }
 function rectPts(off){ const cx=0.5+off, cy=0.5+off, hw=0.16, hh=0.22; return [[cx-hw,cy-hh],[cx+hw,cy-hh],[cx+hw,cy+hh],[cx-hw,cy+hh]]; }
 /* Exemple : une maison hantée, à ajuster ensuite sur ta propre surface. */
 function exampleLayers(){
@@ -426,7 +443,7 @@ function loadExample(){
   save(); refreshAll(); say('Exemple chargé. Touche une forme pour la modifier.',3200);
 }
 function save(){
-  try{ localStorage.setItem(KEY,JSON.stringify({layers:S.layers,sel:S.sel,n:S.n,grid:S.grid,master:S.master})); }catch(e){}
+  try{ localStorage.setItem(KEY,JSON.stringify({layers:S.layers,sel:S.sel,n:S.n,grid:S.grid,snap:S.snap,master:S.master})); }catch(e){}
 }
 function cleanCrop(c){
   if(!c||typeof c!=='object') return {...FULL};
@@ -441,9 +458,9 @@ function load(){
     if(!ok.length) return false;
     S.layers=ok.map(L=>({id:L.id,name:String(L.name||'Forme'),pts:L.pts.map(p=>[cl(+p[0]),cl(+p[1])]),
       fx:FXN[L.fx]?L.fx:'calage',col:cl(+L.col||0,0,COL.length-1)|0,speed:cl(+L.speed||1,0.2,3),int:cl(+L.int||1,0.1,1),text:String(L.text||'BOO !').slice(0,24),
-      src:String(L.src||'').slice(0,120),crop:cleanCrop(L.crop),fit:L.fit==='contain'?'contain':'cover'}));
+      src:String(L.src||'').slice(0,120),crop:cleanCrop(L.crop),fit:L.fit==='contain'?'contain':'cover',lock:!!L.lock}));
     S.sel=S.layers.some(l=>l.id===j.sel)?j.sel:S.layers[0].id;
-    S.n=Math.max(+j.n||0,S.layers.length); S.grid=j.grid!==false; S.master=cl(+j.master||1,0.2,1);
+    S.n=Math.max(+j.n||0,S.layers.length); S.grid=j.grid!==false; S.snap=j.snap!==false; S.master=cl(+j.master||1,0.2,1);
     return true;
   }catch(e){ return false; }
 }
@@ -496,15 +513,21 @@ function overlay(x,W,H){
     const P=L.pts.map(p=>[p[0]*W,p[1]*H]), on=L===cs;
     x.beginPath(); poly(x,P); x.closePath();
     if(on){ x.fillStyle='rgba(255,176,32,.07)'; x.fill(); }
-    x.lineWidth=on?2.5:1.5; x.strokeStyle=on?'#ffb020':'rgba(255,255,255,.55)'; x.stroke();
+    x.lineWidth=on?2.5:1.5; x.strokeStyle=on?'#ffb020':'rgba(255,255,255,.55)';
+    if(L.lock) x.setLineDash([6,5]);
+    x.stroke(); x.setLineDash([]);
   }
-  if(cs){
+  if(cs&&!cs.lock){
     const P=cs.pts.map(p=>[p[0]*W,p[1]*H]);
     P.forEach((p,i)=>{
       const q=P[(i+1)%P.length], m=[(p[0]+q[0])/2,(p[1]+q[1])/2];
       x.fillStyle='#ffb020'; x.strokeStyle='#1a1204'; x.lineWidth=1.5; x.fillRect(m[0]-5,m[1]-5,10,10); x.strokeRect(m[0]-5,m[1]-5,10,10);
     });
-    P.forEach(p=>{ x.beginPath(); x.arc(p[0],p[1],9,0,Math.PI*2); x.fillStyle='#fff'; x.fill(); x.lineWidth=3; x.strokeStyle='#ffb020'; x.stroke(); });
+    P.forEach((p,i)=>{
+      const on=i===S.vi;
+      x.beginPath(); x.arc(p[0],p[1],on?11:9,0,Math.PI*2); x.fillStyle=on?'#ffb020':'#fff'; x.fill();
+      x.lineWidth=3; x.strokeStyle=on?'#fff':'#ffb020'; x.stroke();
+    });
   }
   if(drawing){
     const P=drawing.pts.map(p=>[p[0]*W,p[1]*H]);
@@ -524,7 +547,7 @@ function render(t){
   if(S.mode==='edit') drawBG(x,w,h);
   for(const L of S.layers){ try{ drawLayer(x,L,W,H,D,t); }catch(e){ console.error(e); } }
   x.setTransform(D,0,0,D,0,0); x.globalAlpha=1; x.globalCompositeOperation='source-over';
-  if(S.mode==='edit') overlay(x,W,H);
+  if(S.mode==='edit'){ grabLoupe(W,H,D); overlay(x,W,H); drawLoupe(x,W,H); }
 }
 function frame(now){ try{ render(now/1000); }catch(e){ console.error(e); } requestAnimationFrame(frame); }
 
@@ -545,12 +568,13 @@ cv.addEventListener('pointerdown',e=>{
   if(drawing){ addDrawPoint(p); return; }
   if(S.tab){ S.tab=null; refreshTabs(); }
   const L=cur();
-  if(L){
+  if(L&&!L.lock){
     const P=L.pts.map(q=>[q[0]*p.W,q[1]*p.H]);
     for(let i=0;i<P.length;i++){
       if(Math.hypot(p.x-P[i][0],p.y-P[i][1])<HIT){
-        if(now-lastV.t<400&&lastV.id===L.id&&lastV.i===i&&L.pts.length>3){ L.pts.splice(i,1); lastV={t:0,id:'',i:-1}; save(); return; }
+        if(now-lastV.t<400&&lastV.id===L.id&&lastV.i===i&&L.pts.length>3){ L.pts.splice(i,1); lastV={t:0,id:'',i:-1}; S.vi=-1; save(); refreshPad(); return; }
         lastV={t:now,id:L.id,i};
+        S.vi=i; refreshPad();
         start(e,{kind:'v',L,i}); return;
       }
     }
@@ -558,6 +582,7 @@ cv.addEventListener('pointerdown',e=>{
       const q=P[(i+1)%P.length], m=[(P[i][0]+q[0])/2,(P[i][1]+q[1])/2];
       if(Math.hypot(p.x-m[0],p.y-m[1])<HIT_MID){
         L.pts.splice(i+1,0,[cl(m[0]/p.W),cl(m[1]/p.H)]);
+        S.vi=i+1; refreshPad();
         start(e,{kind:'v',L,i:i+1}); return;
       }
     }
@@ -566,7 +591,7 @@ cv.addEventListener('pointerdown',e=>{
     const M=S.layers[k];
     if(inside(M.pts.map(q=>[q[0]*p.W,q[1]*p.H]),p.x,p.y)){
       select(M.id);
-      start(e,{kind:'m',L:M,sx:p.x,sy:p.y,orig:M.pts.map(q=>[q[0],q[1]])});
+      if(!M.lock) start(e,{kind:'m',L:M,sx:p.x,sy:p.y,orig:M.pts.map(q=>[q[0],q[1]])});
       return;
     }
   }
@@ -577,7 +602,20 @@ cv.addEventListener('pointermove',e=>{
   if(!drag||e.pointerId!==ptrId) return;
   e.preventDefault();
   const p=ptr(e);
-  if(drag.kind==='v'){ drag.L.pts[drag.i]=[cl(p.x/p.W),cl(p.y/p.H)]; }
+  if(drag.kind==='v'){
+    /* Aimant : le coin se colle à un coin d'une autre forme, ou au bord de l'image. */
+    let pt=[cl(p.x/p.W),cl(p.y/p.H)]; drag.snap=false;
+    if(S.snap){
+      let best=14, hit=null;
+      for(const M of S.layers){ if(M===drag.L) continue; for(const q of M.pts){ const d=Math.hypot(q[0]*p.W-p.x,q[1]*p.H-p.y); if(d<best){ best=d; hit=q; } } }
+      if(hit){ pt=[hit[0],hit[1]]; drag.snap=true; }
+      else{
+        if(p.x<10){ pt[0]=0; drag.snap=true; } else if(p.x>p.W-10){ pt[0]=1; drag.snap=true; }
+        if(p.y<10){ pt[1]=0; drag.snap=true; } else if(p.y>p.H-10){ pt[1]=1; drag.snap=true; }
+      }
+    }
+    drag.L.pts[drag.i]=pt;
+  }
   else{
     let dx=(p.x-drag.sx)/p.W, dy=(p.y-drag.sy)/p.H;
     const xs=drag.orig.map(q=>q[0]), ys=drag.orig.map(q=>q[1]);
@@ -599,6 +637,7 @@ function updBan(){
   const n=drawing?drawing.pts.length:0;
   $('#ban-txt').textContent=n?`${n} point${n>1?'s':''} posé${n>1?'s':''}`:'Touche pour poser les points';
   $('#ban-ok').disabled=n<3;
+  refreshPad();
 }
 function addDrawPoint(p){
   if(drawing.pts.length>=3&&Math.hypot(p.x-drawing.pts[0][0]*p.W,p.y-drawing.pts[0][1]*p.H)<28){ finishDraw(); return; }
@@ -608,7 +647,7 @@ function finishDraw(){
   if(drawing&&drawing.pts.length>=3){ const L=mkLayer(drawing.pts); S.layers.push(L); S.sel=L.id; save(); }
   cancelDraw(); refreshAll();
 }
-function cancelDraw(){ drawing=null; $('#ban').hidden=true; }
+function cancelDraw(){ drawing=null; $('#ban').hidden=true; refreshPad(); }
 $('#ban-ok').addEventListener('click',finishDraw);
 $('#ban-no').addEventListener('click',cancelDraw);
 
@@ -618,11 +657,11 @@ function chip(label,pressed,fn){
   if(pressed!=null) b.setAttribute('aria-pressed',pressed);
   b.addEventListener('click',fn); return b;
 }
-function select(id){ S.sel=id; save(); refreshAll(); }
+function select(id){ S.sel=id; S.vi=-1; save(); refreshAll(); }
 function refreshLayers(){
   const box=$('#layers');
   if(!S.layers.length){ const s=document.createElement('span'); s.className='hint'; s.textContent='Aucune forme pour l’instant.'; box.replaceChildren(s); return; }
-  box.replaceChildren(...S.layers.map(L=>chip(`${L.name} · ${FXN[L.fx]}`,L.id===S.sel,()=>select(L.id))));
+  box.replaceChildren(...S.layers.map(L=>chip(`${L.lock?'🔒 ':''}${L.name} · ${FXN[L.fx]}`,L.id===S.sel,()=>select(L.id))));
 }
 function refreshFx(){
   const L=cur();
@@ -630,6 +669,7 @@ function refreshFx(){
   $$('#fxs .chip').forEach(b=>b.setAttribute('aria-pressed',!!L&&b.dataset.fx===L.fx));
   $$('#cols .swb').forEach(b=>b.setAttribute('aria-pressed',!!L&&+b.dataset.col===L.col));
   $('#dup').disabled=!L; $('#del').disabled=!L;
+  $('#lock').disabled=!L; $('#lock').setAttribute('aria-pressed',!!L&&!!L.lock);
   if(!L) return;
   $('#speed').value=L.speed; $('#o-speed').textContent='×'+(+L.speed).toFixed(1).replace('.',',');
   $('#int').value=L.int; $('#o-int').textContent=Math.round(L.int*100)+' %';
@@ -678,9 +718,10 @@ function refreshTabs(){
   $$('.tab').forEach(b=>b.setAttribute('aria-selected',b.dataset.tab===S.tab));
   $('#sheet').hidden=!S.tab;
   $$('[data-pane]').forEach(p=>{ p.hidden=p.dataset.pane!==S.tab; });
+  refreshPad();
 }
 function refreshSet(){
-  $('#grid').checked=S.grid; $('#master').value=S.master; $('#o-master').textContent=Math.round(S.master*100)+' %';
+  $('#grid').checked=S.grid; $('#snap').checked=S.snap; $('#master').value=S.master; $('#o-master').textContent=Math.round(S.master*100)+' %';
 }
 function refreshAll(){ refreshLayers(); refreshFx(); refreshTabs(); refreshSet(); refreshBG(); }
 
@@ -697,6 +738,7 @@ $('#int').addEventListener('input',e=>{ const L=cur(); if(!L) return; L.int=+e.t
 $('#txt').addEventListener('input',e=>{ const L=cur(); if(!L) return; L.text=e.target.value.slice(0,24); save(); });
 $('#master').addEventListener('input',e=>{ S.master=+e.target.value; save(); refreshSet(); });
 $('#grid').addEventListener('change',e=>{ S.grid=e.target.checked; save(); });
+$('#snap').addEventListener('change',e=>{ S.snap=e.target.checked; save(); });
 
 $('#add-rect').addEventListener('click',()=>{
   cancelDraw();
@@ -745,6 +787,83 @@ $('#file').addEventListener('change',e=>{
   }
   L.fx='media'; L.col=6; L.src=f.name; L.crop=L.crop||{...FULL}; save(); refreshAll();
 });
+
+/* ---------- Calage précis : pavé de flèches, loupe, verrouillage ---------- */
+function refreshPad(){
+  const L=cur(), show=S.mode==='edit'&&!!L&&!L.lock&&!S.tab&&!drawing;
+  $('#padrow').hidden=!show;
+  if(!show) return;
+  if(S.vi>=L.pts.length) S.vi=-1;
+  $('#pad-lab').textContent=S.vi>=0?'Point '+(S.vi+1):'Forme';
+}
+let loupeUntil=0;
+function nudge(dx,dy){
+  const L=cur(); if(!L||L.lock) return;
+  const W=cv.clientWidth||1, H=cv.clientHeight||1, ux=dx/W, uy=dy/H;
+  if(S.vi>=0&&S.vi<L.pts.length){
+    const p=L.pts[S.vi]; L.pts[S.vi]=[cl(p[0]+ux),cl(p[1]+uy)];
+    loupeUntil=performance.now()+900;
+  }else{
+    const xs=L.pts.map(q=>q[0]), ys=L.pts.map(q=>q[1]);
+    const mx=cl(ux,-Math.min(...xs),1-Math.max(...xs)), my=cl(uy,-Math.min(...ys),1-Math.max(...ys));
+    L.pts=L.pts.map(q=>[q[0]+mx,q[1]+my]);
+  }
+}
+let rep=null, repT=null;
+function stopRep(){ if(repT){ clearTimeout(repT); repT=null; } if(rep){ clearInterval(rep); rep=null; } save(); }
+$$('#pad [data-d]').forEach(b=>{
+  const [dx,dy]=b.dataset.d.split(',').map(Number);
+  b.addEventListener('pointerdown',e=>{ e.preventDefault(); if(repT||rep) stopRep(); nudge(dx,dy); repT=setTimeout(()=>{ repT=null; rep=setInterval(()=>nudge(dx,dy),45); },380); });
+  ['pointerup','pointerleave','pointercancel'].forEach(ev=>b.addEventListener(ev,()=>{ if(repT||rep) stopRep(); }));
+  b.addEventListener('contextmenu',e=>e.preventDefault());
+});
+$('#pad-lab').addEventListener('click',()=>$('#padrow').classList.toggle('left'));
+/* Flèches du clavier (sur Mac) : 1 pixel, ou 10 avec Maj */
+document.addEventListener('keydown',e=>{
+  const tg=e.target&&e.target.tagName;
+  if(tg==='INPUT'||tg==='TEXTAREA'||S.mode!=='edit') return;
+  const k={ArrowLeft:[-1,0],ArrowRight:[1,0],ArrowUp:[0,-1],ArrowDown:[0,1]}[e.key];
+  if(!k) return;
+  e.preventDefault(); const f=e.shiftKey?10:1; nudge(k[0]*f,k[1]*f); save();
+});
+$('#lock').addEventListener('click',()=>{
+  const L=cur(); if(!L) return;
+  L.lock=!L.lock; S.vi=-1; save(); refreshAll();
+  say(L.lock?'Forme verrouillée : elle ne bougera plus.':'Forme déverrouillée.',2400);
+});
+
+/* Loupe : agrandit la zone sous le doigt pendant qu'on déplace un coin (ou juste après une flèche). */
+const LP=document.createElement('canvas'), LX=LP.getContext('2d'), LR=58, LZ=3;
+let loupeOn=false;
+function loupePoint(){
+  if(drag&&drag.kind==='v') return {L:drag.L,i:drag.i};
+  const L=cur();
+  if(L&&!L.lock&&S.vi>=0&&S.vi<L.pts.length&&performance.now()<loupeUntil) return {L,i:S.vi};
+  return null;
+}
+function grabLoupe(W,H,D){
+  const lp=loupePoint(); loupeOn=!!lp; if(!lp) return;
+  const q=lp.L.pts[lp.i], px=q[0]*W, py=q[1]*H, sz=Math.round(2*LR*D);
+  if(LP.width!==sz){ LP.width=sz; LP.height=sz; }
+  LX.setTransform(1,0,0,1,0,0); LX.fillStyle='#000'; LX.fillRect(0,0,sz,sz);
+  LX.imageSmoothingEnabled=false;
+  LX.setTransform(LZ,0,0,LZ,sz/2-px*D*LZ,sz/2-py*D*LZ); LX.drawImage(cv,0,0);
+}
+function drawLoupe(x,W,H){
+  if(!loupeOn) return; const lp=loupePoint(); if(!lp) return;
+  const q=lp.L.pts[lp.i], px=q[0]*W, py=q[1]*H, gap=LR+56;
+  let cx=cl(px,LR+6,W-LR-6), cy=py-gap;
+  if(cy<LR+6){ cy=cl(py,LR+6,H-LR-6); cx=px>W/2?px-gap:px+gap; }
+  x.save(); x.beginPath(); x.arc(cx,cy,LR,0,Math.PI*2); x.clip();
+  x.drawImage(LP,cx-LR,cy-LR,2*LR,2*LR);
+  const P=lp.L.pts.map(p=>[cx+(p[0]*W-px)*LZ,cy+(p[1]*H-py)*LZ]);
+  x.beginPath(); poly(x,P); x.closePath(); x.lineWidth=1.5; x.strokeStyle='rgba(255,176,32,.9)'; x.stroke();
+  x.strokeStyle='#fff'; x.lineWidth=1; x.beginPath();
+  x.moveTo(cx-12,cy); x.lineTo(cx-3,cy); x.moveTo(cx+3,cy); x.lineTo(cx+12,cy);
+  x.moveTo(cx,cy-12); x.lineTo(cx,cy-3); x.moveTo(cx,cy+3); x.lineTo(cx,cy+12); x.stroke();
+  x.restore();
+  x.beginPath(); x.arc(cx,cy,LR,0,Math.PI*2); x.lineWidth=3; x.strokeStyle=(drag&&drag.snap)?'#7aa2ff':'#ffb020'; x.stroke();
+}
 
 /* Fond caméra ou photo du mur : aide au calage. Visible seulement en édition : jamais projeté, jamais exporté. */
 const BG={el:null,kind:'',stream:null,url:'',dim:0.8};
@@ -802,6 +921,7 @@ document.addEventListener('visibilitychange',()=>{ if(document.visibilityState==
 function setMode(m){
   S.mode=m; document.body.classList.toggle('proj',m==='proj');
   if(m==='proj'){ cancelDraw(); drag=null; ptrId=null; say('Double-touche l’écran pour revenir aux réglages',3200); }
+  refreshPad();
   lock();
 }
 $('#go').addEventListener('click',()=>setMode('proj'));
