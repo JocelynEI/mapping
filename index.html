@@ -2,6 +2,7 @@
 <html lang="fr"><head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<meta http-equiv="Cache-Control" content="no-cache">
 <meta name="apple-mobile-web-app-capable" content="yes">
 <meta name="mobile-web-app-capable" content="yes">
 <meta name="theme-color" content="#05070b">
@@ -216,6 +217,7 @@ body.proj .ui,body.proj .banner{display:none}
         <textarea class="exp" id="exp" readonly rows="4" aria-label="Scène à coller dans la conversation" hidden></textarea>
       </div>
       <p class="hint">Les formes sont gardées dans ce navigateur. Les images et vidéos sont à recharger à chaque ouverture.</p>
+      <p class="hint">Version du 29 octobre, 14 h (vidéo entière par défaut).</p>
     </div>
   </div>
 
@@ -449,7 +451,7 @@ const KEY='atelier-mapping-v1';
 let uc=0;
 const uid=()=>'L'+Date.now().toString(36)+(uc++).toString(36)+Math.floor(Math.random()*1296).toString(36);
 const cur=()=>S.layers.find(l=>l.id===S.sel)||null;
-function mkLayer(pts){ S.n++; return {id:uid(),name:'Forme '+S.n,pts,fx:'calage',col:2,speed:1,int:1,text:'BOO !',src:'',crop:{...FULL},fit:'cover',lock:false}; }
+function mkLayer(pts){ S.n++; return {id:uid(),name:'Forme '+S.n,pts,fx:'calage',col:2,speed:1,int:1,text:'BOO !',src:'',crop:{...FULL},fit:'stretch',lock:false}; }
 function rectPts(off){ const cx=0.5+off, cy=0.5+off, hw=0.16, hh=0.22; return [[cx-hw,cy-hh],[cx+hw,cy-hh],[cx+hw,cy+hh],[cx-hw,cy+hh]]; }
 /* Exemple : une maison hantée, à ajuster ensuite sur ta propre surface. */
 function exampleLayers(){
@@ -1081,7 +1083,9 @@ $('#file').addEventListener('change',e=>{
   }else{
     const im=new Image(); im.onerror=()=>say('Image illisible.',3000); im.src=url; SRC[f.name]={kind:'img',el:im,file:f};
   }
-  L.fx='media'; L.col=6; L.src=f.name; L.crop=L.crop||{...FULL}; save(); refreshAll();
+  /* nouvelle vidéo : on la montre en entier, étirée à la forme (rien n'est coupé) */
+  L.fx='media'; L.col=6; L.src=f.name; L.crop={...FULL}; L.fit='stretch'; save(); refreshAll();
+  say('Vidéo entière, étirée à la forme. Autres choix : onglet Effet, « Adapter la vidéo à la forme ».',4200);
 });
 
 /* ---------- Calage précis : pavé de flèches, loupe, verrouillage ---------- */
